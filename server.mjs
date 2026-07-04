@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
+import { createHash } from 'crypto';
 import config from './crucix.config.mjs';
 import { getLocale, currentLanguage, getSupportedLocales } from './lib/i18n.mjs';
 import { fullBriefing } from './apis/briefing.mjs';
@@ -257,6 +258,85 @@ app.get('/', (req, res) => {
 app.get('/api/data', (req, res) => {
   if (!currentData) return res.status(503).json({ error: 'No data yet — first sweep in progress' });
   res.json(currentData);
+});
+
+// Optional bearer guard shared by the machine-readable feeds (/api/events, /api/state).
+// No-op when CRUCIX_EVENTS_TOKEN is unset — set it and callers must send
+// `Authorization: Bearer <token>`.
+function eventsTokenOk(req) {
+  const token = process.env.CRUCIX_EVENTS_TOKEN;
+  return !token || (req.headers.authorization || '') === `Bearer ${token}`;
+}
+
+// API: events feed for downstream agents (MIDAS et al.) — {"events":[{ts,kind,payload}]}
+// Emits the current sweep's trade ideas as situational events; each carries a stable
+// `id` (type+ticker+title) so pollers can dedup across sweeps that re-serve the same idea.
+app.get('/api/events', (req, res) => {
+  if (!eventsTokenOk(req)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const ts = lastSweepTime || new Date().toISOString();
+  const events = (currentData?.ideas || []).map((idea) => ({
+    ts,
+    kind: `idea_${String(idea.type || 'watch').toLowerCase()}`,
+    payload: {
+      id: createHash('sha1')
+        .update(`${idea.type}:${idea.ticker || ''}:${idea.title}`)
+        .digest('hex')
+        .slice(0, 12),
+      ticker: idea.ticker,
+      title: idea.title,
+      confidence: idea.confidence,
+      horizon: idea.horizon,
+      rationale: idea.rationale || idea.text,
+    },
+  }));
+  res.json({ events, meta: { lastSweep: lastSweepTime, count: events.length } });
+});
+
+// API: curated read-only world-state slice for the MIDAS dashboard.
+// Numbers and short strings only — never the raw OSINT post/article bodies
+// that live in the full /api/data payload. Same optional bearer guard as /api/events.
+app.get('/api/state', (req, res) => {
+  if (!eventsTokenOk(req)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (!currentData) return res.status(503).json({ error: 'no sweep yet' });
+  const d = currentData;
+  const lastDelta = memory.getLastDelta();
+  const deltaSummary = lastDelta?.summary
+    ? `${lastDelta.summary.totalChanges} change(s), ${lastDelta.summary.criticalChanges} critical since previous sweep — direction: ${lastDelta.summary.direction}`
+    : null;
+  res.json({
+    generated_at: lastSweepTime || d.meta?.timestamp || null,
+    sweep_in_progress: sweepInProgress,
+    air: (d.air || []).map((a) => ({
+      region: a.region, total: a.total, no_callsign: a.noCallsign, high_alt: a.highAlt,
+    })),
+    chokepoints: (d.chokepoints || []).map((c) => ({ label: c.label, note: c.note })),
+    thermal: (d.thermal || []).map((t) => ({
+      region: t.region, detections: t.det, night: t.night, high_confidence: t.hc,
+    })),
+    gscpi: d.gscpi
+      ? { value: d.gscpi.value, date: d.gscpi.date, interpretation: d.gscpi.interpretation }
+      : null,
+    energy: {
+      wti: d.energy?.wti ?? null,
+      brent: d.energy?.brent ?? null,
+      natgas: d.energy?.natgas ?? null,
+    },
+    metals: { gold: d.metals?.gold ?? null, silver: d.metals?.silver ?? null },
+    vix: d.markets?.vix ?? null,
+    defense: (d.defense || []).slice(0, 5).map((c) => ({
+      recipient: c.recipient, amount: c.amount, desc: (c.desc || '').slice(0, 80),
+    })),
+    tg: {
+      posts: d.tg?.posts ?? 0,
+      urgent: Array.isArray(d.tg?.urgent) ? d.tg.urgent.length : 0,
+    },
+    delta: deltaSummary,
+    ideas_source: d.ideasSource ?? null,
+  });
 });
 
 // API: health check
