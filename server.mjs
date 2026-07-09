@@ -414,8 +414,9 @@ async function runSweepCycle() {
     console.log('[Crucix] Synthesizing dashboard data...');
     const synthesized = await synthesize(rawData);
 
-    // 4. Delta computation + memory
-    const delta = memory.addRun(synthesized);
+    // 4. Delta computation (persist deferred until ideas are attached — see step 6,
+    //    so the archived snapshot carries this run's ideas, not an empty array)
+    const delta = memory.deltaFor(synthesized);
     synthesized.delta = delta;
 
     // 5. LLM-powered trade ideas (LLM-only feature) — isolated so failures don't kill sweep
@@ -449,6 +450,11 @@ async function runSweepCycle() {
         synthesized.ideasSource = 'rules-failed';
       }
     }
+
+    // 5b. Persist the run now that ideas are attached — the cold archive keeps
+    //     this run's ideas (with per-idea occurrence timestamps), building an
+    //     honest observed-time idea history for MIDAS `event-study`.
+    memory.addRun(synthesized, delta);
 
     // 6. Alert evaluation — Telegram + Discord (LLM with rule-based fallback, multi-tier, semantic dedup)
     if (delta?.summary?.totalChanges > 0) {
