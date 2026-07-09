@@ -1178,6 +1178,13 @@ function initFlatMap(){
     flatG.selectAll('.marker-circle').attr('r',function(){return +this.dataset.baseR/Math.sqrt(k)});
     flatG.selectAll('.marker-label').style('font-size',Math.max(7,9/Math.sqrt(k))+'px')
       .style('display',k>=2.5?'block':'none');
+    // Priority-based visibility: hide low-priority markers at low zoom
+    flatG.selectAll('[data-priority]').style('display',function(){
+      const p=+this.dataset.priority;
+      if(p<=1) return 'block';
+      if(p<=2) return k>=2?'block':'none';
+      return k>=3.5?'block':'none';
+    });
   });
   flatSvg.call(flatZoom);
   drawFlatMap();
