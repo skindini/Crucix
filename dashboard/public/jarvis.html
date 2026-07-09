@@ -257,16 +257,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .ideas-src{font-family:var(--mono);font-size:8px;letter-spacing:0.08em;padding:2px 6px;border:1px solid;display:inline-block;margin-left:6px}
 .ideas-src.llm{color:#ce93d8;border-color:rgba(206,147,216,0.4);background:rgba(206,147,216,0.08)}
 .ideas-src.static{color:var(--dim);border-color:rgba(255,255,255,0.1);background:rgba(255,255,255,0.03)}
-.ideas-src.down{color:#ff5f63;border-color:rgba(255,95,99,0.5);background:rgba(255,95,99,0.12)}
-
-/* TOKEN ALERT — LLM idea engine is down (e.g. Anthropic API out of credit) */
-.token-alert{display:flex;align-items:center;gap:12px;margin:0 0 10px;padding:11px 16px;border:1px solid rgba(255,95,99,0.55);background:linear-gradient(135deg,rgba(255,95,99,0.22),rgba(255,95,99,0.07));box-shadow:0 0 22px rgba(255,95,99,0.18);animation:tokenPulse 2s ease-in-out infinite}
-.token-alert[hidden]{display:none}
-.token-alert .ta-icon{font-size:18px;line-height:1}
-.token-alert .ta-body{flex:1;min-width:0}
-.token-alert .ta-title{font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#fff}
-.token-alert .ta-sub{font-family:var(--mono);font-size:10px;letter-spacing:0.04em;color:rgba(255,220,220,0.85);margin-top:3px}
-@keyframes tokenPulse{0%,100%{border-color:rgba(255,95,99,0.55);box-shadow:0 0 22px rgba(255,95,99,0.18)}50%{border-color:rgba(255,95,99,0.9);box-shadow:0 0 30px rgba(255,95,99,0.32)}}
 
 /* LOW PERFORMANCE MODE */
 body.low-perf .bg-grid,body.low-perf .bg-radial,body.low-perf .scanline{display:none!important}
@@ -342,13 +332,6 @@ body.low-perf .ticker-wrap::-webkit-scrollbar-thumb{background:rgba(100,240,200,
 <div class="bg-grid" id="bgGrid"></div>
 <div class="scanline" id="scanline"></div>
 <div id="main">
-  <div class="token-alert" id="tokenAlert" hidden>
-    <span class="ta-icon">&#9888;</span>
-    <div class="ta-body">
-      <div class="ta-title" id="tokenAlertTitle">Add more tokens</div>
-      <div class="ta-sub" id="tokenAlertSub"></div>
-    </div>
-  </div>
   <div class="topbar" id="topbar"></div>
   <div class="grid">
     <div class="col" id="leftRail"></div>
@@ -1498,7 +1481,7 @@ function renderLower(){
       </div>
     </div>`;
   const ideasPanel = `<div class="g-panel lp-ideas">
-      <div class="sec-head"><h3>${t('panels.tradeIdeas','Leverageable Ideas')}</h3>${D.ideasSource==='llm'?'<span class="ideas-src llm">'+t('ideas.aiEnhanced','AI ENHANCED')+'</span>':String(D.ideasSource||'').indexOf('failed')!==-1?'<span class="ideas-src down">'+t('ideas.llmDown','LLM DOWN · RULES')+'</span>':D.ideasSource==='rules'?'<span class="ideas-src static">'+t('ideas.rules','RULES')+'</span>':D.ideasSource==='disabled'?'<span class="ideas-src static">'+t('ideas.llmOff','LLM OFF')+'</span>':'<span class="ideas-src static">'+t('ideas.pending','PENDING')+'</span>'}</div>
+      <div class="sec-head"><h3>${t('panels.tradeIdeas','Leverageable Ideas')}</h3>${D.ideasSource==='llm'?'<span class="ideas-src llm">'+t('ideas.aiEnhanced','AI ENHANCED')+'</span>':D.ideasSource==='disabled'?'<span class="ideas-src static">'+t('ideas.llmOff','LLM OFF')+'</span>':'<span class="ideas-src static">'+t('ideas.pending','PENDING')+'</span>'}</div>
       ${ideasHtml}
       <div class="disclosure">FOR INFORMATIONAL PURPOSES ONLY. This is not financial advice, a recommendation to buy or sell any security, or a solicitation of any kind. All signal-based observations are derived from publicly available OSINT data and should not be relied upon for investment decisions. Consult a licensed financial advisor before making any investment. Past performance does not guarantee future results.</div>
     </div>`;
@@ -1713,23 +1696,9 @@ function syncResponsiveLayout(force=false){
   refreshMapViewport(force && !isFlat);
 }
 
-// === TOKEN ALERT: LLM idea engine down (out of API credit) ===
-function renderTokenAlert(){
-  const el = document.getElementById('tokenAlert');
-  if (!el) return;
-  const src = String(D.ideasSource || '');
-  // ideasSource records 'llm-failed→rules' etc. whenever the LLM call errors.
-  const down = src.indexOf('llm-failed') !== -1 || src.indexOf('failed') !== -1;
-  el.hidden = !down;
-  if (down) {
-    const sub = document.getElementById('tokenAlertSub');
-    if (sub) sub.textContent = 'LLM idea engine is down (Anthropic API likely out of credit). Ideas fell back to the rules engine — top up tokens to restore AI-enhanced ideas.';
-  }
-}
-
 // === REINIT (for live updates without boot sequence) ===
 function reinit(){
-  renderTopbar();renderLeftRail();renderLower();renderRight();renderTokenAlert();
+  renderTopbar();renderLeftRail();renderLower();renderRight();
   plotMarkers();
 }
 
@@ -1768,7 +1737,7 @@ function connectSSE(){
 // === INIT ===
 let booted = false;
 function init(){
-  renderTopbar();renderLeftRail();renderLower();renderRight();renderTokenAlert();
+  renderTopbar();renderLeftRail();renderLower();renderRight();
   renderGlossary();
   initMap();
   if (!booted) { runBoot(); booted = true; }
