@@ -419,6 +419,20 @@ async function runSweepCycle() {
     const delta = memory.deltaFor(synthesized);
     synthesized.delta = delta;
 
+    // Rule-based fallback — no LLM key/credit needed (VIX / HY-spread / oil / conflict signals).
+    // Runs whenever the LLM is unconfigured OR fails, so the idea archive keeps filling
+    // even when the LLM is down (e.g. out of API credit) instead of logging empty runs.
+    const rulesIdeas = () => {
+      try {
+        const ideas = generateIdeas(synthesized) || [];
+        console.log(`[Crucix] Rule-based engine generated ${ideas.length} ideas`);
+        return { ideas, source: 'rules' };
+      } catch (ruleErr) {
+        console.error('[Crucix] Rule-based ideas failed (non-fatal):', ruleErr.message);
+        return { ideas: [], source: 'rules-failed' };
+      }
+    };
+
     // 5. LLM-powered trade ideas (LLM-only feature) — isolated so failures don't kill sweep
     if (llmProvider?.isConfigured) {
       try {
@@ -430,25 +444,20 @@ async function runSweepCycle() {
           synthesized.ideasSource = 'llm';
           console.log(`[Crucix] LLM generated ${llmIdeas.length} ideas`);
         } else {
-          synthesized.ideas = [];
-          synthesized.ideasSource = 'llm-failed';
+          const { ideas, source } = rulesIdeas();
+          synthesized.ideas = ideas;
+          synthesized.ideasSource = `llm-failed→${source}`;
         }
       } catch (llmErr) {
         console.error('[Crucix] LLM ideas failed (non-fatal):', llmErr.message);
-        synthesized.ideas = [];
-        synthesized.ideasSource = 'llm-failed';
+        const { ideas, source } = rulesIdeas();
+        synthesized.ideas = ideas;
+        synthesized.ideasSource = `llm-failed→${source}`;
       }
     } else {
-      // Rule-based fallback — no LLM key needed (VIX / HY-spread / oil / conflict signals)
-      try {
-        synthesized.ideas = generateIdeas(synthesized) || [];
-        synthesized.ideasSource = 'rules';
-        console.log(`[Crucix] Rule-based engine generated ${synthesized.ideas.length} ideas`);
-      } catch (ruleErr) {
-        console.error('[Crucix] Rule-based ideas failed (non-fatal):', ruleErr.message);
-        synthesized.ideas = [];
-        synthesized.ideasSource = 'rules-failed';
-      }
+      const { ideas, source } = rulesIdeas();
+      synthesized.ideas = ideas;
+      synthesized.ideasSource = source;
     }
 
     // 5b. Persist the run now that ideas are attached — the cold archive keeps
