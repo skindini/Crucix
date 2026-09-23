@@ -256,6 +256,20 @@ export async function fetchAllNews() {
   return selected.slice(0, 50);
 }
 
+// === Federal contract rows for the dashboard / LLM / /api/state ===
+// `basis` says what `amount` measures. Rows written before the USAspending
+// transaction switch carry no amountBasis — those amounts were cumulative
+// lifetime award values, so they are labelled as such, never as new money.
+export function synthesizeDefense(usaspending) {
+  return (usaspending?.recentDefenseContracts || []).slice(0, 5).map(c => ({
+    recipient: c.recipient?.substring(0, 40), amount: c.amount, desc: c.description?.substring(0, 80),
+    basis: c.amountBasis || 'award_total',
+    agency: c.agency || null,
+    date: c.date || null,
+    newAward: c.newAward ?? null,
+  }));
+}
+
 // === Leverageable Ideas from Signals ===
 export function generateIdeas(V2) {
   const ideas = [];
@@ -394,7 +408,8 @@ export function generateIdeas(V2) {
     }
   }
 
-  return ideas.slice(0, 8);
+  // Tag provenance so /api/events can tell MIDAS a rules idea from an LLM one.
+  return ideas.slice(0, 8).map(idea => ({ ...idea, source: 'rules' }));
 }
 
 // === Synthesize raw sweep data into dashboard format ===
@@ -453,9 +468,7 @@ export async function synthesize(data) {
   const debtArr = treasuryData.debt || [];
   const treasury = { totalDebt: debtArr[0]?.totalDebt || '0', signals: treasuryData.signals || [] };
   const gscpi = data.sources.GSCPI?.latest || null;
-  const defense = (data.sources.USAspending?.recentDefenseContracts || []).slice(0, 5).map(c => ({
-    recipient: c.recipient?.substring(0, 40), amount: c.amount, desc: c.description?.substring(0, 80)
-  }));
+  const defense = synthesizeDefense(data.sources.USAspending);
   const noaa = {
     totalAlerts: data.sources.NOAA?.totalSevereAlerts || 0,
     alerts: (data.sources.NOAA?.topAlerts || []).filter(a => a.lat != null && a.lon != null).slice(0, 10).map(a => ({
