@@ -7,14 +7,14 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
-import { createHash } from 'crypto';
 import config from './crucix.config.mjs';
 import { getLocale, currentLanguage, getSupportedLocales } from './lib/i18n.mjs';
 import { fullBriefing } from './apis/briefing.mjs';
 import { synthesize, generateIdeas } from './dashboard/inject.mjs';
 import { MemoryManager } from './lib/delta/index.mjs';
 import { createLLMProvider } from './lib/llm/index.mjs';
-import { generateLLMIdeas } from './lib/llm/ideas.mjs';
+import { generateLLMIdeasDetailed } from './lib/llm/ideas.mjs';
+import { buildIdeaEvents } from './lib/events.mjs';
 import { TelegramAlerter } from './lib/alerts/telegram.mjs';
 import { DiscordAlerter } from './lib/alerts/discord.mjs';
 
@@ -270,27 +270,14 @@ function eventsTokenOk(req) {
 
 // API: events feed for downstream agents (MIDAS et al.) — {"events":[{ts,kind,payload}]}
 // Emits the current sweep's trade ideas as situational events; each carries a stable
-// `id` (type+ticker+title) so pollers can dedup across sweeps that re-serve the same idea.
+// `id` (type+ticker+title) so pollers can dedup across sweeps that re-serve the same idea,
+// plus source (llm|rules), risk, signals and first_seen — see lib/events.mjs.
 app.get('/api/events', (req, res) => {
   if (!eventsTokenOk(req)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   const ts = lastSweepTime || new Date().toISOString();
-  const events = (currentData?.ideas || []).map((idea) => ({
-    ts,
-    kind: `idea_${String(idea.type || 'watch').toLowerCase()}`,
-    payload: {
-      id: createHash('sha1')
-        .update(`${idea.type}:${idea.ticker || ''}:${idea.title}`)
-        .digest('hex')
-        .slice(0, 12),
-      ticker: idea.ticker,
-      title: idea.title,
-      confidence: idea.confidence,
-      horizon: idea.horizon,
-      rationale: idea.rationale || idea.text,
-    },
-  }));
+  const events = buildIdeaEvents(currentData?.ideas, { ts, ideasSource: currentData?.ideasSource });
   res.json({ events, meta: { lastSweep: lastSweepTime, count: events.length } });
 });
 
@@ -327,8 +314,14 @@ app.get('/api/state', (req, res) => {
     },
     metals: { gold: d.metals?.gold ?? null, silver: d.metals?.silver ?? null },
     vix: d.markets?.vix ?? null,
+    // amount_basis: "obligated_in_window" = new money obligated in the sweep window;
+    // "award_total" = a lifetime award value (only from runs saved before the fix).
     defense: (d.defense || []).slice(0, 5).map((c) => ({
       recipient: c.recipient, amount: c.amount, desc: (c.desc || '').slice(0, 80),
+      amount_basis: c.basis || 'award_total',
+      agency: c.agency ?? null,
+      date: c.date ?? null,
+      new_award: c.newAward ?? null,
     })),
     tg: {
       posts: d.tg?.posts ?? 0,
@@ -438,15 +431,20 @@ async function runSweepCycle() {
       try {
         console.log('[Crucix] Generating LLM trade ideas...');
         const previousIdeas = memory.getLastRun()?.ideas || [];
-        const llmIdeas = await generateLLMIdeas(llmProvider, synthesized, delta, previousIdeas);
+        const { ideas: llmIdeas, failure, stats } =
+          await generateLLMIdeasDetailed(llmProvider, synthesized, delta, previousIdeas);
         if (llmIdeas) {
           synthesized.ideas = llmIdeas;
           synthesized.ideasSource = 'llm';
-          console.log(`[Crucix] LLM generated ${llmIdeas.length} ideas`);
+          const nulled = stats?.tickersNulled ? ` (${stats.tickersNulled} malformed ticker(s) nulled)` : '';
+          console.log(`[Crucix] LLM generated ${llmIdeas.length} ideas${nulled}`);
         } else {
           const { ideas, source } = rulesIdeas();
           synthesized.ideas = ideas;
-          synthesized.ideasSource = `llm-failed→${source}`;
+          // Keep the "llm-failed" prefix (MIDAS's dashboard banner keys on "failed");
+          // name the failure class when it is one we can tell apart.
+          const why = failure?.kind && failure.kind !== 'error' ? `:${failure.kind}` : '';
+          synthesized.ideasSource = `llm-failed${why}→${source}`;
         }
       } catch (llmErr) {
         console.error('[Crucix] LLM ideas failed (non-fatal):', llmErr.message);
@@ -459,6 +457,10 @@ async function runSweepCycle() {
       synthesized.ideas = ideas;
       synthesized.ideasSource = source;
     }
+
+    // 5a. Stamp each idea's first_seen (when its /api/events id first appeared),
+    //      using the sweep time so first_seen <= the event ts. Saved by addRun.
+    memory.stampFirstSeen(synthesized.ideas, lastSweepTime);
 
     // 5b. Persist the run now that ideas are attached — the cold archive keeps
     //     this run's ideas (with per-idea occurrence timestamps), building an
