@@ -545,14 +545,17 @@ async function start() {
   server.on('listening', async () => {
     console.log(`[Crucix] Server running on http://localhost:${port}`);
 
-    // Auto-open browser
+    // Auto-open browser (OPEN_BROWSER=false skips it — headless/service installs
+    // shouldn't leave an unattended tab sitting on the live feed)
     // NOTE: On Windows, `start` in PowerShell is an alias for Start-Service, not cmd's start.
     // We must use `cmd /c start ""` to ensure it works in both cmd.exe and PowerShell.
-    const openCmd = process.platform === 'win32' ? 'cmd /c start ""' :
-                    process.platform === 'darwin' ? 'open' : 'xdg-open';
-    exec(`${openCmd} "http://localhost:${port}"`, (err) => {
-      if (err) console.log('[Crucix] Could not auto-open browser:', err.message);
-    });
+    if (!/^(false|0|no|off)$/i.test(process.env.OPEN_BROWSER || '')) {
+      const openCmd = process.platform === 'win32' ? 'cmd /c start ""' :
+                      process.platform === 'darwin' ? 'open' : 'xdg-open';
+      exec(`${openCmd} "http://localhost:${port}"`, (err) => {
+        if (err) console.log('[Crucix] Could not auto-open browser:', err.message);
+      });
+    }
 
     // Try to load existing data first for instant display (await so dashboard shows immediately)
     try {

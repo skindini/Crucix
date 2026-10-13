@@ -1087,9 +1087,10 @@ function showPopup(event,head,text,meta,lat,lng,alt){
   if(left<0) left=10;
   if(top<0) top=10;
   popup.style.left=left+'px';popup.style.top=top+'px';
-  popup.querySelector('.pp-head').textContent=head||'';
+  // head/text/meta are built from escapeData'd strings + static markup (<br>)
+  popup.querySelector('.pp-head').innerHTML=head||'';
   popup.querySelector('.pp-text').innerHTML=text||'';
-  popup.querySelector('.pp-meta').textContent=meta||'';
+  popup.querySelector('.pp-meta').innerHTML=meta||'';
   popup.classList.add('show');
 }
 function closePopup(){document.getElementById('mapPopup').classList.remove('show')}
@@ -1435,7 +1436,7 @@ function renderLower(){
   const tickerCards = feed.map(n => {
     const sc = srcClass(n.source);
     const age = n.timestamp ? getAge(n.timestamp) : '';
-    const urlAttr = n.url ? ` data-url="${String(n.url).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"` : '';
+    const urlAttr = n.url ? ` data-url="${n.url}"` : ''; // already escaped by escapeData
     return `<div class="tk-card ${n.urgent?'urgent':''} ${n.url?'clickable':''}"${urlAttr}><span class="tk-src ${sc}">${(n.source||'NEWS').substring(0,12)}</span><span class="tk-time">${age}</span><div class="tk-head">${cleanText(n.headline||'')}</div>${n.url?'<span class="tk-link">&#8599;</span>':''}</div>`;
   }).join('');
   const tickerDuration = Math.max(20, feed.length * 2.5);
@@ -1558,6 +1559,17 @@ function renderRight(){
 
 // === HELPERS ===
 function getAge(d){const ms=Date.now()-new Date(d).getTime();const h=Math.floor(ms/3600000);if(h<1)return 'just now';if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago'}
+// Every string the server sends is feed-derived (RSS, GDELT, Telegram, WHO, KiwiSDR
+// names, LLM ideas…) and the panels are built with innerHTML templates. So the data
+// is HTML-escaped once, where it enters the page (escapeData at fetch + SSE), and
+// every sink renders it as inert text. Do not assign server data to D without it.
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function escapeData(v){
+  if(typeof v==='string') return escapeHtml(v);
+  if(Array.isArray(v)) return v.map(escapeData);
+  if(v&&typeof v==='object'){const o={};for(const k of Object.keys(v)) o[k]=escapeData(v[k]);return o;}
+  return v;
+}
 function cleanText(t){return t.replace(/&#39;/g,"'").replace(/&#33;/g,"!").replace(/&amp;/g,"&").replace(/<[^>]+>/g,'')}
 function safeExternalUrl(raw){try{const u=new URL(raw,location.href);return u.protocol==='http:'||u.protocol==='https:'?u.toString():null}catch{return null}}
 
@@ -1720,7 +1732,7 @@ function connectSSE(){
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === 'update' && msg.data) {
-        D = msg.data;
+        D = escapeData(msg.data);
         reinit();
         // Flash the topbar to indicate update
         const topbar = document.querySelector('.topbar');
@@ -1773,8 +1785,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (canProbeApi && !hasInlineData) {
     // Server mode: always fetch live data from API (ignore any stale inline D)
     fetch('/api/data')
-      .then(r => r.json())
-      .then(data => { D = data; init(); connectSSE(); })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(data => { D = escapeData(data); init(); connectSSE(); })
       .catch(() => {
         // Should not reach here — server routes to loading.html when no data
         if (D && D.meta) { init(); connectSSE(); }
