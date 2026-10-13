@@ -102,6 +102,8 @@ function poisoned(d) {
   // Fields the audit named, set explicitly so they exist whatever the sample holds.
   out.ideas = [{ type: 'LONG', ticker: PAYLOADS[1], title: PAYLOADS[1], text: PAYLOADS[0],
     risk: PAYLOADS[3], horizon: PAYLOADS[4], confidence: PAYLOADS[2] }];
+  // Feed-derived object KEYS reach innerHTML too (leftRail renders militaryByCountry keys).
+  out.space = { ...(out.space || {}), militaryByCountry: { [PAYLOADS[1]]: 7, [PAYLOADS[0]]: 3, US: 2 } };
   out.newsFeed = [{ headline: PAYLOADS[1], source: PAYLOADS[3], url: 'https://ex.com/a?b=1&c="2"',
     timestamp: '2026-10-13T00:00:00Z', urgent: true }];
   out.tg = { ...out.tg, urgent: [{ channel: PAYLOADS[4], text: PAYLOADS[2], views: 5, date: '2026-10-13T00:00:00Z' }],
@@ -188,8 +190,18 @@ describe('escape helpers', () => {
     assert.equal(out.o.s, '&lt;x&gt;');
   });
 
+  it('escapes object keys too (feed-derived map keys are rendered)', () => {
+    const out = escapeData({ m: { '<img src=x onerror=XSS7()>': 1, US: 2 } });
+    for (const k of Object.keys(out.m)) assert.doesNotMatch(k, /[<>"']/);
+    assert.equal(out.m.US, 2);
+  });
+
   it('cleanText of escaped text never yields a raw "<"', () => {
     for (const p of PAYLOADS) assert.ok(!cleanText(escapeHtml(p)).includes('<'), p);
+  });
+
+  it('markup inside feed text is stripped for display, as before', () => {
+    assert.equal(cleanText(escapeHtml('Breaking: <b>Strait</b> closed')), 'Breaking: Strait closed');
   });
 
   it('RSS-encoded ampersands still display as "&"', () => {

@@ -1567,10 +1567,12 @@ function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;
 function escapeData(v){
   if(typeof v==='string') return escapeHtml(v);
   if(Array.isArray(v)) return v.map(escapeData);
-  if(v&&typeof v==='object'){const o={};for(const k of Object.keys(v)) o[k]=escapeData(v[k]);return o;}
+  // keys too: some panels render map keys (e.g. space.militaryByCountry = CelesTrak COUNTRY_CODE)
+  if(v&&typeof v==='object'){const o={};for(const k of Object.keys(v)) o[escapeHtml(k)]=escapeData(v[k]);return o;}
   return v;
 }
-function cleanText(t){return t.replace(/&#39;/g,"'").replace(/&#33;/g,"!").replace(/&amp;/g,"&").replace(/<[^>]+>/g,'')}
+// Input is escapeData'd: tags in the feed text arrive as &lt;b&gt; — strip those as text (inert either way).
+function cleanText(t){return t.replace(/&lt;\/?[a-z][^&]*?&gt;/gi,'').replace(/&#39;/g,"'").replace(/&#33;/g,"!").replace(/&amp;/g,"&").replace(/<[^>]+>/g,'')}
 function safeExternalUrl(raw){try{const u=new URL(raw,location.href);return u.protocol==='http:'||u.protocol==='https:'?u.toString():null}catch{return null}}
 
 // === BOOT SEQUENCE ===
