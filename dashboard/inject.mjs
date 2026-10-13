@@ -700,6 +700,14 @@ function getCliArg(flag) {
   return idx >= 0 ? process.argv[idx + 1] : null;
 }
 
+/** Swap the inline `let D = …;` line for fresh data. Feed text must not end the
+ *  <script> (`</script>`) or break the one-line D (U+2028/9), so those are \u-escaped. */
+export function embedData(html, json) {
+  const safeJson = json.replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  // Use a replacer function so JSON is inserted literally even if it contains `$`.
+  return html.replace(/^(let|const) D = .*;\s*$/m, () => 'let D = ' + safeJson + ';');
+}
+
 async function cliInject() {
   const data = JSON.parse(readFileSync(join(ROOT, 'runs/latest.json'), 'utf8'));
   const htmlOverride = getCliArg('--html');
@@ -740,8 +748,7 @@ async function cliInject() {
 
   const htmlPath = htmlOverride || join(ROOT, 'dashboard/public/jarvis.html');
   let html = readFileSync(htmlPath, 'utf8');
-  // Use a replacer function so JSON is inserted literally even if it contains `$`.
-  html = html.replace(/^(let|const) D = .*;\s*$/m, () => 'let D = ' + json + ';');
+  html = embedData(html, json);
   writeFileSync(htmlPath, html);
   console.log('Data injected into jarvis.html!');
 

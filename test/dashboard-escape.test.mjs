@@ -7,12 +7,15 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { embedData } from '../dashboard/inject.mjs';
 
-const HTML_PATH = process.env.JARVIS_HTML
-  || fileURLToPath(new URL('../dashboard/public/jarvis.html', import.meta.url));
+const HTML_DEFAULT = fileURLToPath(new URL('../dashboard/public/jarvis.html', import.meta.url));
+const HTML_PATH = process.env.JARVIS_HTML || HTML_DEFAULT;
 
 // One payload per bypass class. Each carries an XSS<n> marker so a leak is unambiguous.
 const PAYLOADS = [
@@ -26,7 +29,7 @@ const PAYLOADS = [
 const LIVE = /<\s*(script|img|svg|b)\b[^>]*XSS\d|<[a-z][^>]*\son\w+\s*=\s*XSS\d/i;
 
 function loadDashboard({ width = 1400 } = {}) {
-  const html = readFileSync(HTML_PATH, 'utf8');
+  const html = readFileSync(process.env.JARVIS_HTML || HTML_PATH, 'utf8');
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
     .map((m) => m[1]).find((s) => s.includes('function renderLeftRail'));
   assert.ok(script, 'main dashboard script not found');
@@ -191,5 +194,27 @@ describe('escape helpers', () => {
 
   it('RSS-encoded ampersands still display as "&"', () => {
     assert.equal(cleanText(escapeHtml('AT&amp;T')), 'AT&amp;T'); // innerHTML renders "AT&T"
+  });
+});
+
+describe('static (file) mode', () => {
+  it('inline D baked by inject renders inert, and cannot end its <script>', async () => {
+    const html = readFileSync(HTML_PATH, 'utf8');
+    const sample = JSON.parse(html.match(/^let D = (.*);\s*$/m)[1]);
+    const bad = poisoned(sample);
+    bad.ideas[0].title = '</script><script>XSS9()</script>\u2028x';
+    const baked = embedData(html, JSON.stringify(bad));
+    assert.ok(!/^let D = .*<\/script>/m.test(baked), 'payload closed the <script> early');
+    const tmp = join(mkdtempSync(join(tmpdir(), 'crucix-')), 'jarvis.html');
+    writeFileSync(tmp, baked);
+    process.env.JARVIS_HTML = tmp;
+    try {
+      const dash = loadDashboard();
+      dash.ctx.location.protocol = 'file:';
+      for (const cb of dash.listeners.DOMContentLoaded || []) cb();
+      await flush(); await flush();
+      assert.equal(dash.ctx.__t.getD().ideas[0].title.includes('<'), false, 'inline D not escaped');
+      assertInert(dash.writes, dash.calls, 'file');
+    } finally { delete process.env.JARVIS_HTML; }
   });
 });

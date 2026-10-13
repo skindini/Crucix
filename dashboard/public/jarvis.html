@@ -1792,7 +1792,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (D && D.meta) { init(); connectSSE(); }
       });
   } else if (hasInlineData) {
-    // File mode: use inline data
+    // File mode: use inline data (baked by inject.mjs from the same feeds)
+    D = escapeData(D);
     init();
   }
 });
