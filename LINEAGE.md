@@ -51,5 +51,6 @@ The ~3,100 bare `crucix` strings across `alfred/` and `midas/` are the **service
   `127.0.0.1`. `/`, static files and `/api/health` stay open (cabal doctor probes `/`).
   Never front Crucix with a same-host proxy (`tailscale serve`) while relying on the guard —
   every proxied caller would look loopback.
-- The dashboard escaping (`escapeData`) and `OPEN_BROWSER` are upstream-shaped — commit
-  `fix(dashboard): escape feed data at the page boundary` is the candidate PR to calesthio.
+- The dashboard escaping (`escapeData`), `OPEN_BROWSER` and inject's `embedData` are
+  upstream-shaped: the three `fix(dashboard): …` commits of 2026-10-13 (5984b40, 745f016, f2adcbb)
+  cherry-pick cleanly onto upstream master without the guard (verified) and are the candidate PR.
