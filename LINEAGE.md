@@ -40,3 +40,16 @@ nothing. Verified live with `git ls-remote` before the decision.
 
 The ~3,100 bare `crucix` strings across `alfred/` and `midas/` are the **service name**
 (`fetch_crucix()`, `MIDAS_CRUCIX_URL`, `crucix:n/a` grounding labels) — unrelated to the slug.
+
+## Fork-only behaviour to keep out of upstream PRs
+
+- **`lib/access.mjs` — the live-data guard (2026-10-13, audit ss-9cc36e22).** With
+  `CRUCIX_EVENTS_TOKEN` set, `/api/data`, `/api/events`, `/api/state` and SSE `/events` need
+  `Authorization: Bearer <token>` unless the caller is loopback *and* names a loopback Host.
+  The body binds `*:3117` on purpose: midas D30 polls `http://alfred.local:3117/api/events`
+  from the mini (sending Keychain `midas-crucix-token`), and every body consumer uses
+  `127.0.0.1`. `/`, static files and `/api/health` stay open (cabal doctor probes `/`).
+  Never front Crucix with a same-host proxy (`tailscale serve`) while relying on the guard —
+  every proxied caller would look loopback.
+- The dashboard escaping (`escapeData`) and `OPEN_BROWSER` are upstream-shaped — commit
+  `fix(dashboard): escape feed data at the page boundary` is the candidate PR to calesthio.

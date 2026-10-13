@@ -15,6 +15,7 @@ import { MemoryManager } from './lib/delta/index.mjs';
 import { createLLMProvider } from './lib/llm/index.mjs';
 import { generateLLMIdeasDetailed } from './lib/llm/ideas.mjs';
 import { buildIdeaEvents } from './lib/events.mjs';
+import { feedAccessOk } from './lib/access.mjs';
 import { TelegramAlerter } from './lib/alerts/telegram.mjs';
 import { DiscordAlerter } from './lib/alerts/discord.mjs';
 
@@ -256,24 +257,21 @@ app.get('/', (req, res) => {
 
 // API: current data
 app.get('/api/data', (req, res) => {
+  if (!feedAccessOk(req)) return res.status(401).json({ error: 'unauthorized' });
   if (!currentData) return res.status(503).json({ error: 'No data yet — first sweep in progress' });
   res.json(currentData);
 });
 
-// Optional bearer guard shared by the machine-readable feeds (/api/events, /api/state).
-// No-op when CRUCIX_EVENTS_TOKEN is unset — set it and callers must send
-// `Authorization: Bearer <token>`.
-function eventsTokenOk(req) {
-  const token = process.env.CRUCIX_EVENTS_TOKEN;
-  return !token || (req.headers.authorization || '') === `Bearer ${token}`;
-}
+// Live-data routes share one optional bearer guard (lib/access.mjs): no-op when
+// CRUCIX_EVENTS_TOKEN is unset; when set, loopback callers pass and everyone else
+// must send `Authorization: Bearer <token>`. `/`, static files and /api/health stay open.
 
 // API: events feed for downstream agents (MIDAS et al.) — {"events":[{ts,kind,payload}]}
 // Emits the current sweep's trade ideas as situational events; each carries a stable
 // `id` (type+ticker+title) so pollers can dedup across sweeps that re-serve the same idea,
 // plus source (llm|rules), risk, signals and first_seen — see lib/events.mjs.
 app.get('/api/events', (req, res) => {
-  if (!eventsTokenOk(req)) {
+  if (!feedAccessOk(req)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   const ts = lastSweepTime || new Date().toISOString();
@@ -285,7 +283,7 @@ app.get('/api/events', (req, res) => {
 // Numbers and short strings only — never the raw OSINT post/article bodies
 // that live in the full /api/data payload. Same optional bearer guard as /api/events.
 app.get('/api/state', (req, res) => {
-  if (!eventsTokenOk(req)) {
+  if (!feedAccessOk(req)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   if (!currentData) return res.status(503).json({ error: 'no sweep yet' });
@@ -362,12 +360,14 @@ app.get('/api/locales', (req, res) => {
 });
 
 // SSE: live updates
+// No CORS header: the dashboard is same-origin, and with the loopback pass any
+// website open in a local browser could otherwise read the stream cross-origin.
 app.get('/events', (req, res) => {
+  if (!feedAccessOk(req)) return res.status(401).json({ error: 'unauthorized' });
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
   });
   res.write('data: {"type":"connected"}\n\n');
   sseClients.add(res);
