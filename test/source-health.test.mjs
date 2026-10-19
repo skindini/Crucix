@@ -86,9 +86,23 @@ describe('missing-key wording (refuted in round 3, 2026-10-18)', () => {
     'Set FOO_API_KEY in .env', 'no key configured',
     JSON.stringify({ code: 'API_KEY_MISSING', message: 'No api_key was supplied.' })];
   const notNokey = ['HTTP 429: API key rate limit exceeded', 'HTTP 429: no more requests for this API key today',
-    "Unexpected token '<', not valid JSON", 'invalid token', 'fetch failed'];
+    "Unexpected token '<', not valid JSON", 'invalid token', 'fetch failed',
+    'fetch failed for api_key endpoint: no route to host'];
   for (const t of nokey) it(`nokey: ${t}`, () => assert.equal(isNoKeyText(t), true));
   for (const t of notNokey) it(`not nokey: ${t}`, () => assert.equal(isNoKeyText(t), false));
+
+  it('a rejected key reads nokey too (same remedy: a valid key)', () => {
+    assert.equal(isNoKeyText('Invalid API key'), true);
+    assert.equal(isNoKeyText('Unauthorized: invalid credentials'), true);
+  });
+
+  it('USAspending is judged by its contracts, not its computed window', () => {
+    const failed = { defenseWindow: { start: '2026-10-05', end: '2026-10-19', days: 14 },
+      recentDefenseContracts: [], topAgencies: [], defenseError: 'request failed (after 2 attempts)' };
+    assert.equal(classifySource(OK, failed, null, 'USAspending').state, 'error');
+    assert.equal(classifySource(OK, { ...failed, recentDefenseContracts: [{ amount: 1 }] },
+      null, 'USAspending').state, 'lit');
+  });
 
   it('status is matched case-insensitively', () => {
     assert.equal(classifySource(OK, { status: 'ERROR' }).state, 'error');
