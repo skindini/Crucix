@@ -7,7 +7,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  LIVE, classifySource, hasData, isNoKeyText, readHistory, recordSweep, snapshotSweep, summarize,
+  LIVE, classifySource, hasData, isNoKeyText, readHistory, recordSweep, snapshotSweep, stateCounts,
+  summarize,
 } from '../lib/source-health.mjs';
 
 const OK = { status: 'ok', ms: 100 };
@@ -234,5 +235,18 @@ describe('summarize', () => {
     const e = summarize([], { now });
     assert.deepEqual(e.sources, []);
     assert.equal(e.cadence.last_sweep, null);
+  });
+});
+
+describe('stateCounts — what /api/health reports beside the legacy sourcesOk', () => {
+  it('counts a keyless and a swallowed-empty source as not lit', () => {
+    const snap = { sources: {
+      FRED: { state: 'lit' }, Reddit: { state: 'nokey' }, WHO: { state: 'empty' },
+      Space: { state: 'error' }, Maritime: { state: 'stub' }, BLS: { state: 'lit' },
+    } };
+    assert.deepEqual(stateCounts(snap), { lit: 2, empty: 1, nokey: 1, stub: 1, error: 1 });
+  });
+  it('is all-zero for a missing snapshot, never a throw', () => {
+    assert.deepEqual(stateCounts(null), { lit: 0, empty: 0, nokey: 0, stub: 0, error: 0 });
   });
 });

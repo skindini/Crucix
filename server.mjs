@@ -16,7 +16,7 @@ import { createLLMProvider } from './lib/llm/index.mjs';
 import { generateLLMIdeasDetailed } from './lib/llm/ideas.mjs';
 import { buildIdeaEvents } from './lib/events.mjs';
 import { feedAccessOk } from './lib/access.mjs';
-import { HISTORY_FILE, readHistory, recordSweep, snapshotSweep, summarize } from './lib/source-health.mjs';
+import { HISTORY_FILE, readHistory, recordSweep, snapshotSweep, stateCounts, summarize } from './lib/source-health.mjs';
 import { archiveSweep } from './lib/raw-archive.mjs';
 import { TelegramAlerter } from './lib/alerts/telegram.mjs';
 import { DiscordAlerter } from './lib/alerts/discord.mjs';
@@ -33,6 +33,7 @@ for (const dir of [RUNS_DIR, MEMORY_DIR, join(MEMORY_DIR, 'cold')]) {
 
 // === State ===
 let currentData = null;    // Current synthesized dashboard data
+let lastSourceCounts = null; // payload-judged state counts of the last sweep (source-health)
 let lastSweepTime = null;  // Timestamp of last sweep
 let sweepStartedAt = null; // Timestamp when current/last sweep started
 let sweepInProgress = false;
@@ -357,8 +358,11 @@ app.get('/api/health', (req, res) => {
       : null,
     sweepInProgress,
     sweepStartedAt,
+    // Legacy: "answered" counts — a keyless source reports ok here. Read sourcesLit.
     sourcesOk: currentData?.meta?.sourcesOk || 0,
     sourcesFailed: currentData?.meta?.sourcesFailed || 0,
+    sourcesLit: lastSourceCounts ? lastSourceCounts.lit : null,
+    sourceStates: lastSourceCounts,
     llmEnabled: !!config.llm.provider,
     llmProvider: config.llm.provider,
     telegramEnabled: !!(config.telegram.botToken && config.telegram.chatId),
@@ -421,7 +425,9 @@ async function runSweepCycle() {
 
     // 2b. Per-source health history (fork-only; lib/source-health.mjs). Never fatal.
     try {
-      recordSweep(join(RUNS_DIR, HISTORY_FILE), snapshotSweep(rawData, lastSweepTime));
+      const snap = snapshotSweep(rawData, lastSweepTime);
+      lastSourceCounts = stateCounts(snap);
+      recordSweep(join(RUNS_DIR, HISTORY_FILE), snap);
     } catch (err) {
       console.error('[Crucix] source-health record failed:', err.message);
     }
@@ -589,6 +595,7 @@ async function start() {
     // Try to load existing data first for instant display (await so dashboard shows immediately)
     try {
       const existing = JSON.parse(readFileSync(join(RUNS_DIR, 'latest.json'), 'utf8'));
+      try { lastSourceCounts = stateCounts(snapshotSweep(existing)); } catch { /* health stays null */ }
       const data = await synthesize(existing);
       currentData = data;
       console.log('[Crucix] Loaded existing data from runs/latest.json — dashboard ready instantly');
