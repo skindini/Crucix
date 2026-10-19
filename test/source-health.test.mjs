@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  classifySource, hasData, readHistory, recordSweep, snapshotSweep, summarize,
+  classifySource, hasData, isNoKeyText, readHistory, recordSweep, snapshotSweep, summarize,
 } from '../lib/source-health.mjs';
 
 const OK = { status: 'ok', ms: 100 };
@@ -77,6 +77,26 @@ describe('classifySource — the payload decides, not the label', () => {
   it('a timeout carries the briefing error text as its detail', () => {
     const c = classifySource({ status: 'error' }, undefined, 'Source GDELT timed out after 30s');
     assert.equal(c.detail, 'Source GDELT timed out after 30s');
+  });
+});
+
+describe('missing-key wording (refuted in round 3, 2026-10-18)', () => {
+  const nokey = ['No FRED API key. Get one free', 'API key required', 'API key not configured',
+    'Missing FRED_API_KEY', 'No FIRMS_MAP_KEY', 'ADSB_API_KEY required for area search',
+    'Set FOO_API_KEY in .env', 'no key configured',
+    JSON.stringify({ code: 'API_KEY_MISSING', message: 'No api_key was supplied.' })];
+  const notNokey = ['HTTP 429: API key rate limit exceeded', 'HTTP 429: no more requests for this API key today',
+    "Unexpected token '<', not valid JSON", 'invalid token', 'fetch failed'];
+  for (const t of nokey) it(`nokey: ${t}`, () => assert.equal(isNoKeyText(t), true));
+  for (const t of notNokey) it(`not nokey: ${t}`, () => assert.equal(isNoKeyText(t), false));
+
+  it('status is matched case-insensitively', () => {
+    assert.equal(classifySource(OK, { status: 'ERROR' }).state, 'error');
+  });
+
+  it('a bare boolean flag is not data', () => {
+    assert.equal(classifySource(OK, { dataAvailable: true }).state, 'empty');
+    assert.equal(classifySource(OK, { sdnList: { recordCount: 19457, dataAvailable: true } }).state, 'lit');
   });
 });
 
