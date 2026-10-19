@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  classifySource, readHistory, recordSweep, snapshotSweep, summarize,
+  classifySource, hasData, readHistory, recordSweep, snapshotSweep, summarize,
 } from '../lib/source-health.mjs';
 
 const OK = { status: 'ok', ms: 100 };
@@ -22,14 +22,39 @@ describe('classifySource — the payload decides, not the label', () => {
     ['AIS ready (key set, no data)', OK, { source: 'Maritime', status: 'ready' }, 'stub'],
     ['Space fetch failed', OK, { source: 'Space', status: 'error', error: 'fetch failed' }, 'error'],
     ['Telegram web_scrape carries posts', OK, { status: 'web_scrape', totalPosts: 187 }, 'lit'],
-    ['KiwiSDR active', OK, { status: 'active', network: {} }, 'lit'],
-    ['YFinance has no status field', OK, { quotes: {} }, 'lit'],
+    ['KiwiSDR active', OK, { status: 'active', network: { receivers: 612 } }, 'lit'],
+    ['YFinance has no status field', OK, { quotes: { SPY: { price: 580.1 } } }, 'lit'],
     ['GDELT timed out (no payload)', { status: 'error', ms: 30002 }, undefined, 'error'],
     ['missing payload, timing ok', OK, undefined, 'error'],
+    // refuted 2026-10-18 by adversarial-verify — each from a real payload shape
+    ['HTML error page (JSON "token" text) is an outage, not a key', OK,
+      { error: "Unexpected token '<', \"<!DOCTYPE html>\" is not valid JSON" }, 'error'],
+    ['ReliefWeb rwError with no datasets', OK,
+      { rwError: 'HTTP 406: Blocked due to bot activity', rwNote: 'retry later', hdxDatasets: [] }, 'error'],
+    ['Bluesky topics all empty', OK, { topics: { conflict: [], markets: [], health: [] } }, 'empty'],
+    ['OpenSanctions echoes each query with 0 results', OK,
+      { recentSearches: [{ query: 'Russia', totalResults: 0, entities: [] }], totalSanctionedEntities: 0,
+        datasets: [], monitoringTargets: ['Iran'] }, 'empty'],
+    ['EPA zero readings beside static reference tables', OK,
+      { totalReadings: 0, readings: [], monitoredAnalytes: ['I-131'], thresholds: { x: 1 }, note: 'n' }, 'empty'],
+    ['status ok with an empty container', OK, { status: 'ok', items: [] }, 'empty'],
+    ['a named *Error beside real data stays lit', OK,
+      { diseaseOutbreakNews: [{ title: 'x' }], outbreakError: 'one feed down' }, 'lit'],
   ];
   for (const [label, timing, payload, want] of cases) {
     it(label, () => assert.equal(classifySource(timing, payload).state, want));
   }
+
+  it('a partial error rides along in the lit detail', () => {
+    const c = classifySource(OK, { diseaseOutbreakNews: [1], outbreakError: 'one feed down' });
+    assert.equal(c.detail, 'partial: one feed down');
+  });
+
+  it('hasData: zeros, empties and nested metadata carry nothing', () => {
+    assert.equal(hasData({ a: 0, b: [], c: {}, d: '' }), false);
+    assert.equal(hasData({ hits: [{ query: 'Iran', totalResults: 0 }] }), false);
+    assert.equal(hasData({ value: 101.9 }), true);
+  });
 
   it('a timeout carries the briefing error text as its detail', () => {
     const c = classifySource({ status: 'error' }, undefined, 'Source GDELT timed out after 30s');
@@ -50,16 +75,23 @@ describe('snapshotSweep', () => {
     assert.equal(snap.sources.FRED.state, 'lit');
     assert.equal(snap.ts, '2026-10-19T00:00:00.000Z');
   });
+
+  it('drops the `undefined` row briefing.mjs writes for a rejected source', () => {
+    const snap = snapshotSweep({ timing: { undefined: { status: 'error' }, FRED: OK },
+      sources: { FRED: { indicators: [1] } } }, '2026-10-19T00:00:00.000Z');
+    assert.deepEqual(Object.keys(snap.sources), ['FRED']);
+  });
 });
 
 describe('recordSweep + readHistory', () => {
-  it('appends, trims rows past 30 days, and skips a torn line', () => {
+  it('appends, trims rows past 30 days, skips a torn line and an unparseable ts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sh-'));
     try {
       const path = join(dir, 'h.jsonl');
       const now = Date.parse('2026-10-19T00:00:00Z');
       const old = { ts: '2026-09-01T00:00:00Z', sources: { A: { state: 'lit' } } };
-      writeFileSync(path, JSON.stringify(old) + '\n{"torn":\n');
+      writeFileSync(path, JSON.stringify(old) + '\n{"torn":\n'
+        + JSON.stringify({ ts: 'not-a-date', sources: {} }) + '\n');
       recordSweep(path, { ts: '2026-10-19T00:00:00Z', sources: { A: { state: 'nokey' } } }, now);
       const rows = readHistory(path);
       assert.equal(rows.length, 1);
@@ -97,7 +129,7 @@ describe('summarize', () => {
     assert.equal(s.cadence.sweeps_24h, 3);
     assert.equal(s.cadence.expected_24h, 96);
     assert.equal(s.cadence.last_sweep, at(1));
-    assert.deepEqual(s.counts, { lit: 2, nokey: 0, stub: 0, error: 0 });
+    assert.deepEqual(s.counts, { lit: 2, empty: 0, nokey: 0, stub: 0, error: 0 });
   });
 
   it('an empty history is an empty, well-formed answer', () => {

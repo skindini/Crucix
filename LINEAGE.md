@@ -53,7 +53,7 @@ The ~3,100 bare `crucix` strings across `alfred/` and `midas/` are the **service
   every proxied caller would look loopback.
 - **`lib/source-health.mjs` + `GET /api/sources` (2026-10-18).** Each sweep appends one line to
   `runs/source-health.jsonl` (30-day retention), judging every source by its payload: lit,
-  nokey, stub or error. `/api/health`'s `sourcesOk` counts a keyless source as ok, which hid eight
+  empty, nokey, stub or error. `/api/health`'s `sourcesOk` counts a keyless source as ok, which hid eight
   dark sources. `/api/sources` serves state, last lit, and 24h/7d uptime per source, plus sweep
   cadence, behind the same guard. MIDAS's CRUCIX tab ("Data feeds") reads it. `bin/sync-keys.sh`
   (same date) moves source keys from the mini's Keychain into the body's `.env`.
