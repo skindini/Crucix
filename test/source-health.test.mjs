@@ -138,6 +138,15 @@ describe('LIVE — one measured-value check per source module (round 5, 2026-10-
     it(label, () => assert.equal(classifySource(OK, payload, null, name).state, want));
   }
 
+  it('OpenSky partial outage: one hotspot down, others carrying aircraft → lit, partial', () => {
+    const p = { hotspots: [{ region: 'A', totalAircraft: 40 }, { region: 'B', totalAircraft: 0, error: 'HTTP 503' }],
+      error: 'OpenSky unavailable for 1/2 hotspots' };
+    assert.deepEqual(classifySource(OK, p, null, 'OpenSky'),
+      { state: 'lit', detail: 'partial: OpenSky unavailable for 1/2 hotspots' });
+    const allDown = { ...p, hotspots: [{ region: 'B', totalAircraft: 0, error: 'HTTP 503' }] };
+    assert.equal(classifySource(OK, allDown, null, 'OpenSky').state, 'error');
+  });
+
   it('a throwing check reads as no data, never crashes', () => {
     assert.equal(classifySource(OK, { quotes: 'not-an-object' }, null, 'YFinance').state, 'empty');
   });
