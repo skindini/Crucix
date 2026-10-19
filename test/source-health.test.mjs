@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  classifySource, hasData, isNoKeyText, readHistory, recordSweep, snapshotSweep, summarize,
+  LIVE, classifySource, hasData, isNoKeyText, readHistory, recordSweep, snapshotSweep, summarize,
 } from '../lib/source-health.mjs';
 
 const OK = { status: 'ok', ms: 100 };
@@ -114,11 +114,40 @@ describe('missing-key wording (refuted in round 3, 2026-10-18)', () => {
   });
 });
 
+describe('LIVE — one measured-value check per source module (round 5, 2026-10-18)', () => {
+  const MODULES = ['ACLED', 'ADS-B', 'BLS', 'Bluesky', 'CISA-KEV', 'Cloudflare-Radar', 'Comtrade', 'EIA',
+    'EPA', 'FIRMS', 'FRED', 'GDELT', 'GSCPI', 'KiwiSDR', 'Maritime', 'NOAA', 'OFAC', 'OpenSanctions',
+    'OpenSky', 'Patents', 'Reddit', 'ReliefWeb', 'Safecast', 'Space', 'Telegram', 'Treasury',
+    'USAspending', 'WHO', 'YFinance'];
+  it('covers every one of the 29 source modules', () => {
+    assert.deepEqual(MODULES.filter((n) => !LIVE[n]), []);
+  });
+
+  const cases = [
+    ['Safecast sites with labels but zero readings', 'Safecast',
+      { sites: [{ site: 'Fukushima', key: 'f', recentReadings: 0, avgCPM: null }] }, 'empty'],
+    ['Safecast with a reading', 'Safecast', { sites: [{ site: 'Fukushima', recentReadings: 3 }] }, 'lit'],
+    ['OpenSky regions with zero aircraft', 'OpenSky',
+      { hotspots: [{ region: 'Gulf', key: 'g', totalAircraft: 0, byCountry: {} }] }, 'empty'],
+    ['OpenSky with aircraft', 'OpenSky', { hotspots: [{ region: 'Gulf', totalAircraft: 12 }] }, 'lit'],
+    ['FRED indicators with null values', 'FRED', { indicators: [{ id: 'DFF', label: 'x', value: null }] }, 'empty'],
+    ['KiwiSDR with zero receivers online', 'KiwiSDR', { network: { totalReceivers: 753, online: 0 } }, 'empty'],
+    ['OFAC flags only', 'OFAC', { advancedList: { dataAvailable: true, recordCount: null } }, 'empty'],
+  ];
+  for (const [label, name, payload, want] of cases) {
+    it(label, () => assert.equal(classifySource(OK, payload, null, name).state, want));
+  }
+
+  it('a throwing check reads as no data, never crashes', () => {
+    assert.equal(classifySource(OK, { quotes: 'not-an-object' }, null, 'YFinance').state, 'empty');
+  });
+});
+
 describe('snapshotSweep', () => {
   it('lists a source that exists only in timing (timed out before writing a payload)', () => {
     const snap = snapshotSweep({
       timing: { GDELT: { status: 'error', ms: 30002 }, FRED: OK },
-      sources: { FRED: { indicators: [1] } },
+      sources: { FRED: { indicators: [{ id: 'DFF', value: 3.88 }] } },
       errors: [{ name: 'GDELT', error: 'Source GDELT timed out after 30s' }],
     }, '2026-10-19T00:00:00.000Z');
     assert.deepEqual(Object.keys(snap.sources), ['FRED', 'GDELT']);
@@ -130,7 +159,7 @@ describe('snapshotSweep', () => {
 
   it('drops the `undefined` row briefing.mjs writes for a rejected source', () => {
     const snap = snapshotSweep({ timing: { undefined: { status: 'error' }, FRED: OK },
-      sources: { FRED: { indicators: [1] } } }, '2026-10-19T00:00:00.000Z');
+      sources: { FRED: { indicators: [{ id: 'DFF', value: 3.88 }] } } }, '2026-10-19T00:00:00.000Z');
     assert.deepEqual(Object.keys(snap.sources), ['FRED']);
   });
 });
