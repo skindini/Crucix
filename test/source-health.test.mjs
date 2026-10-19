@@ -38,12 +38,30 @@ describe('classifySource — the payload decides, not the label', () => {
     ['EPA zero readings beside static reference tables', OK,
       { totalReadings: 0, readings: [], monitoredAnalytes: ['I-131'], thresholds: { x: 1 }, note: 'n' }, 'empty'],
     ['status ok with an empty container', OK, { status: 'ok', items: [] }, 'empty'],
+    // refuted in round 2 (2026-10-18)
+    ['429 that mentions "API key" is an outage, not a missing key', OK,
+      { error: 'HTTP 429: API key rate limit exceeded' }, 'error'],
+    ['an error carried as an object', OK, { error: { message: 'boom' } }, 'error'],
+    ['status "failed"', OK, { status: 'failed' }, 'error'],
+    ['a non-empty errors list with no data', OK, { errors: ['fetch failed'], items: [] }, 'error'],
+    ['a null *Error beside empty data is empty, not error', OK,
+      { diseaseOutbreakNews: [], outbreakError: null, monitoringCapabilities: ['x'] }, 'empty'],
     ['a named *Error beside real data stays lit', OK,
       { diseaseOutbreakNews: [{ title: 'x' }], outbreakError: 'one feed down' }, 'lit'],
   ];
   for (const [label, timing, payload, want] of cases) {
     it(label, () => assert.equal(classifySource(timing, payload).state, want));
   }
+
+  it('Telegram is judged by its posts, not its static channel list', () => {
+    const dead = { status: 'web_scrape', channelsMonitored: 3, channelsReachable: 0, totalPosts: 0,
+      topPosts: [], urgentPosts: [], channels: [{ title: 'a', reachable: false }],
+      errors: [{ channel: 'a', error: 'HTTP 403' }] };
+    assert.equal(classifySource(OK, dead, null, 'Telegram').state, 'error');
+    const quiet = { ...dead, errors: undefined };
+    assert.equal(classifySource(OK, quiet, null, 'Telegram').state, 'empty');
+    assert.equal(classifySource(OK, { ...quiet, topPosts: [{ text: 'x' }] }, null, 'Telegram').state, 'lit');
+  });
 
   it('a partial error rides along in the lit detail', () => {
     const c = classifySource(OK, { diseaseOutbreakNews: [1], outbreakError: 'one feed down' });
@@ -84,14 +102,15 @@ describe('snapshotSweep', () => {
 });
 
 describe('recordSweep + readHistory', () => {
-  it('appends, trims rows past 30 days, skips a torn line and an unparseable ts', () => {
+  it('appends, trims rows past 30 days, skips a torn line, an unparseable ts and a row without sources', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sh-'));
     try {
       const path = join(dir, 'h.jsonl');
       const now = Date.parse('2026-10-19T00:00:00Z');
       const old = { ts: '2026-09-01T00:00:00Z', sources: { A: { state: 'lit' } } };
       writeFileSync(path, JSON.stringify(old) + '\n{"torn":\n'
-        + JSON.stringify({ ts: 'not-a-date', sources: {} }) + '\n');
+        + JSON.stringify({ ts: 'not-a-date', sources: {} }) + '\n'
+        + JSON.stringify({ ts: '2026-10-18T00:00:00Z' }) + '\n');
       recordSweep(path, { ts: '2026-10-19T00:00:00Z', sources: { A: { state: 'nokey' } } }, now);
       const rows = readHistory(path);
       assert.equal(rows.length, 1);
@@ -130,6 +149,13 @@ describe('summarize', () => {
     assert.equal(s.cadence.expected_24h, 96);
     assert.equal(s.cadence.last_sweep, at(1));
     assert.deepEqual(s.counts, { lit: 2, empty: 0, nokey: 0, stub: 0, error: 0 });
+  });
+
+  it('the 24h window is half-open: a sweep exactly 24h old is out', () => {
+    const edge = summarize([{ ts: at(24), sources: { A: { state: 'lit' } } },
+      { ts: at(0), sources: { A: { state: 'lit' } } }], { now });
+    assert.equal(edge.cadence.sweeps_24h, 1);
+    assert.equal(edge.sources[0].uptime_24h.sweeps, 1);
   });
 
   it('an empty history is an empty, well-formed answer', () => {

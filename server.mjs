@@ -286,8 +286,12 @@ app.get('/api/sources', (req, res) => {
   if (!feedAccessOk(req)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  const rows = readHistory(join(RUNS_DIR, HISTORY_FILE));
-  res.json(summarize(rows, { refreshMinutes: config.refreshIntervalMinutes }));
+  try {
+    const rows = readHistory(join(RUNS_DIR, HISTORY_FILE));
+    res.json(summarize(rows, { refreshMinutes: config.refreshIntervalMinutes }));
+  } catch (err) {
+    res.status(500).json({ error: `source-health unreadable: ${err.message}` });
+  }
 });
 
 // API: curated read-only world-state slice for the MIDAS dashboard.
