@@ -17,6 +17,7 @@ import { generateLLMIdeasDetailed } from './lib/llm/ideas.mjs';
 import { buildIdeaEvents } from './lib/events.mjs';
 import { feedAccessOk } from './lib/access.mjs';
 import { HISTORY_FILE, readHistory, recordSweep, snapshotSweep, summarize } from './lib/source-health.mjs';
+import { archiveSweep } from './lib/raw-archive.mjs';
 import { TelegramAlerter } from './lib/alerts/telegram.mjs';
 import { DiscordAlerter } from './lib/alerts/discord.mjs';
 
@@ -423,6 +424,12 @@ async function runSweepCycle() {
       recordSweep(join(RUNS_DIR, HISTORY_FILE), snapshotSweep(rawData, lastSweepTime));
     } catch (err) {
       console.error('[Crucix] source-health record failed:', err.message);
+    }
+    // 2c. Raw per-source archive — the history a future backtest needs (lib/raw-archive.mjs). Never fatal.
+    try {
+      archiveSweep(RUNS_DIR, rawData, lastSweepTime);
+    } catch (err) {
+      console.error('[Crucix] raw archive failed:', err.message);
     }
 
     // 3. Synthesize into dashboard format

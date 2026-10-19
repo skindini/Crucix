@@ -57,6 +57,10 @@ The ~3,100 bare `crucix` strings across `alfred/` and `midas/` are the **service
   dark sources. `/api/sources` serves state, last lit, and 24h/7d uptime per source, plus sweep
   cadence, behind the same guard. MIDAS's CRUCIX tab ("Data feeds") reads it. `bin/sync-keys.sh`
   (same date) moves source keys from the mini's Keychain into the body's `.env`.
+- **`lib/raw-archive.mjs` (2026-10-19).** Each sweep's raw per-source payloads (minus Telegram, which the
+  cold store keeps) append to `runs/raw/YYYY-MM-DD.jsonl.gz`, one gzip member per sweep, about 2 MB a day,
+  kept indefinitely. The cold store keeps only 14 synthesized blocks, so Radar, OFAC, USAspending,
+  CISA-KEV, Comtrade, Space, NOAA, KiwiSDR and the YFinance block left no history to backtest on.
 - The dashboard escaping (`escapeData`), `OPEN_BROWSER` and inject's `embedData` are
   upstream-shaped: the three `fix(dashboard): …` commits of 2026-10-13 (5984b40, 745f016, f2adcbb)
   cherry-pick cleanly onto upstream master without the guard (verified) and are the candidate PR.
