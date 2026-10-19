@@ -16,6 +16,7 @@ import { createLLMProvider } from './lib/llm/index.mjs';
 import { generateLLMIdeasDetailed } from './lib/llm/ideas.mjs';
 import { buildIdeaEvents } from './lib/events.mjs';
 import { feedAccessOk } from './lib/access.mjs';
+import { HISTORY_FILE, readHistory, recordSweep, snapshotSweep, summarize } from './lib/source-health.mjs';
 import { TelegramAlerter } from './lib/alerts/telegram.mjs';
 import { DiscordAlerter } from './lib/alerts/discord.mjs';
 
@@ -279,6 +280,16 @@ app.get('/api/events', (req, res) => {
   res.json({ events, meta: { lastSweep: lastSweepTime, count: events.length } });
 });
 
+// API: per-source health — state judged by payload, uptime over 24h/7d, sweep
+// cadence (fork-only; lib/source-health.mjs). Same optional bearer guard as /api/events.
+app.get('/api/sources', (req, res) => {
+  if (!feedAccessOk(req)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const rows = readHistory(join(RUNS_DIR, HISTORY_FILE));
+  res.json(summarize(rows, { refreshMinutes: config.refreshIntervalMinutes }));
+});
+
 // API: curated read-only world-state slice for the MIDAS dashboard.
 // Numbers and short strings only — never the raw OSINT post/article bodies
 // that live in the full /api/data payload. Same optional bearer guard as /api/events.
@@ -402,6 +413,13 @@ async function runSweepCycle() {
     // 2. Save to runs/latest.json
     writeFileSync(join(RUNS_DIR, 'latest.json'), JSON.stringify(rawData, null, 2));
     lastSweepTime = new Date().toISOString();
+
+    // 2b. Per-source health history (fork-only; lib/source-health.mjs). Never fatal.
+    try {
+      recordSweep(join(RUNS_DIR, HISTORY_FILE), snapshotSweep(rawData, lastSweepTime));
+    } catch (err) {
+      console.error('[Crucix] source-health record failed:', err.message);
+    }
 
     // 3. Synthesize into dashboard format
     console.log('[Crucix] Synthesizing dashboard data...');
